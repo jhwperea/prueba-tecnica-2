@@ -1,0 +1,13 @@
+[2025-06-10 18:19:55] ERROR: POST /api/auth/login 500 - 13.635 ms 
+[2025-06-10 18:20:10] ERROR: POST /api/auth/login 500 - 8.776 ms 
+[2025-06-10 18:20:41] ERROR: POST /api/auth/login 500 - 39.775 ms 
+[2025-06-10 18:20:43] ERROR: POST /api/auth/login 500 - 25.538 ms 
+[2025-06-10 18:21:16] ERROR: POST /api/auth/login 500 - 108.925 ms 
+[2025-06-10 18:21:37] ERROR: POST /api/auth/login 500 - 5886.884 ms 
+[2025-06-11 07:52:32] ERROR: POST /api/auth/login 500 - 87.226 ms 
+[2025-06-11 07:53:06] ERROR: POST /api/auth/login 500 - 12.267 ms 
+[2025-06-11 08:28:50] ERROR: POST /api/auth/login 500 - 12.372 ms 
+[2025-06-11 08:29:19] ERROR: POST /api/auth/login 500 - 7.761 ms 
+[2025-06-11 08:29:34] ERROR: POST /api/auth/login 500 - 9.037 ms 
+[2025-06-11 09:38:18] ERROR: POST /api/appointments/save_patient_appointment 500 - 106.526 ms 
+[2025-06-11 14:25:42] ERROR: GET /api/appointments/get_available_session_by_date?fecha=2025-06-11 500 - 58982.701 ms 

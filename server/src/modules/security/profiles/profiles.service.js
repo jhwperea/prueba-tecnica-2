@@ -1,0 +1,234 @@
+import {
+  getConnection,
+  releaseConnection,
+  executeQuery,
+} from "../../../common/configs/db.config.js";
+import _ from "lodash";
+
+export const paginationProfiles = async ({
+  useId,
+  name,
+  staId,
+  rows,
+  first,
+  sortField,
+  sortOrder,
+}) => {
+  const order = sortOrder === 1 ? "ASC" : "DESC";
+  let connection = null;
+  try {
+    connection = await getConnection();
+
+    const params = [];
+    const wheres = ["p.sta_id != 3"];
+
+    if (name) {
+      wheres.push("p.pro_name LIKE ?");
+      params.push(`%${name}%`);
+    }
+
+    if (staId) {
+      wheres.push("p.sta_id = ?");
+      params.push(staId);
+    }
+
+    if (useId != 1) {
+      wheres.push("p.pro_id != 1");
+    }
+
+    const whereClause = `WHERE ${wheres.join(" AND ")}`;
+
+    const mainQuery = `
+      SELECT
+        p.pro_id AS proId,
+        p.pro_name AS name,
+        e.sta_name AS statusName,
+        p.pro_update_by AS updatedBy,
+        p.pro_update_at AS updatedAt,
+        p.sta_id AS staId
+      FROM tbl_profiles p
+      JOIN tbl_status e ON p.sta_id = e.sta_id
+      ${whereClause}
+      ORDER BY ${sortField} ${order}
+      LIMIT ${rows} OFFSET ${first}
+    `;
+
+    const countQuery = `
+      SELECT COUNT(DISTINCT pro_id) tot
+      FROM tbl_profiles p
+      JOIN tbl_status e ON p.sta_id = e.sta_id
+      ${whereClause}
+    `;
+
+    const results = await executeQuery(mainQuery, params, connection);
+    const rowsc = await executeQuery(countQuery, params, connection);
+
+    return { results, total: rowsc[0].tot };
+  } finally {
+    releaseConnection(connection);
+  }
+};
+
+export const getModules = async ({ proId }) => {
+  let connection = null;
+  try {
+    connection = await getConnection();
+
+    const resultsAso = await executeQuery(
+      `SELECT v.pag_parent AS parent, v.pag_id AS pagId, v.pag_description AS description
+       FROM tbl_pages v
+       JOIN tbl_page_permissions pp ON v.pag_id = pp.pag_id
+       WHERE pp.pro_id = ?
+       ORDER BY v.pag_order`,
+      [proId],
+      connection
+    );
+
+    const idasociados = resultsAso.length
+      ? resultsAso.map(({ pagId }) => pagId).join(",")
+      : "''";
+
+    const results = await executeQuery(
+      `SELECT pag_parent AS parent, pag_id AS pagId, pag_description AS description
+       FROM tbl_pages
+       WHERE pag_id NOT IN (${idasociados})`,
+      [],
+      connection
+    );
+
+    return { associated: resultsAso, unassociated: results };
+  } finally {
+    releaseConnection(connection);
+  }
+};
+
+export const saveProfile = async ({
+  proId,
+  name,
+  staId,
+  modules,
+  previousModules,
+  useBy,
+}) => {
+  const wh = proId > 0 ? `AND pro_id != ${proId}` : "";
+  let connection = null;
+  try {
+    connection = await getConnection();
+    await connection.beginTransaction();
+
+    const resultsQuery = await executeQuery(
+      `SELECT pro_id FROM tbl_profiles WHERE pro_name = ? AND sta_id != 3 ${wh} LIMIT 1`,
+      [name],
+      connection
+    );
+
+    if (resultsQuery.length > 0) {
+      const error = new Error(
+        "Ya existe un Perfil con el nombre ingresado. Verificar"
+      );
+      error.status = 400;
+      throw error;
+    }
+
+    if (proId > 0) {
+      const updateProfile = await executeQuery(
+        `UPDATE tbl_profiles SET pro_name = ?, sta_id = ?, pro_update_by = ? WHERE pro_id = ?`,
+        [name, staId, useBy, proId],
+        connection
+      );
+
+      if (updateProfile.affectedRows > 0) {
+        const moddelete = _.difference(previousModules, modules);
+        const modinsert = _.difference(modules, previousModules);
+
+        if (moddelete.length > 0) {
+          await executeQuery(
+            `DELETE FROM tbl_page_permissions WHERE pro_id = ? AND pag_id IN(${moddelete.join(",")})`,
+            [proId],
+            connection
+          );
+        }
+
+        for (const pagId of modinsert) {
+          await executeQuery(
+            "INSERT INTO tbl_page_permissions(pro_id, pag_id) values(?, ?)",
+            [proId, pagId],
+            connection
+          );
+        }
+
+        await connection.commit();
+        return { message: `Perfil ${name} Modificado Correctamente` };
+      }
+
+      const error = new Error("No se encontró el perfil para ser actualizado.");
+      error.status = 400;
+      throw error;
+    }
+
+    const insertProfile = await executeQuery(
+      `INSERT INTO tbl_profiles (pro_name, sta_id, pro_create_by, pro_update_by) VALUES(?,?,?,?)`,
+      [name, staId, useBy, useBy],
+      connection
+    );
+
+    if (insertProfile.insertId > 0) {
+      for (const pagId of modules) {
+        await executeQuery(
+          "INSERT INTO tbl_page_permissions(pro_id, pag_id) values(?, ?)",
+          [insertProfile.insertId, pagId],
+          connection
+        );
+      }
+
+      await connection.commit();
+      return {
+        message: `Perfil ${name} Creado Correctamente`,
+        proId: insertProfile.insertId,
+      };
+    }
+
+    const error = new Error("Ocurrió un error al intentar registrar el perfil.");
+    error.status = 500;
+    throw error;
+  } catch (err) {
+    if (connection) await connection.rollback();
+    throw err;
+  } finally {
+    releaseConnection(connection);
+  }
+};
+
+export const deleteProfile = async ({ proId, updatedBy }) => {
+  let connection = null;
+  try {
+    connection = await getConnection();
+    await connection.beginTransaction();
+
+    const deleteProfile = await executeQuery(
+      "UPDATE tbl_profiles SET sta_id = 3, pro_update_by = ? WHERE pro_id = ?",
+      [updatedBy, proId],
+      connection
+    );
+
+    if (deleteProfile.affectedRows > 0) {
+      await executeQuery(
+        "DELETE FROM tbl_page_permissions WHERE pro_id = ?",
+        [proId],
+        connection
+      );
+
+      await connection.commit();
+      return { message: "Perfil Eliminado Correctamente" };
+    }
+
+    const error = new Error("Error al eliminar el perfil.");
+    error.statusCode = 400;
+    throw error;
+  } catch (err) {
+    if (connection) await connection.rollback();
+    throw err;
+  } finally {
+    releaseConnection(connection);
+  }
+};
