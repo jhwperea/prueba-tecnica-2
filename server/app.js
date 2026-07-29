@@ -24,7 +24,8 @@ const allowedOrigins = [
   'http://localhost',
   'http://127.0.0.1',
   'https://pavastecnologia.com',
-  'https://www.pavastecnologia.com'
+  'https://www.pavastecnologia.com',
+  'https://frontend-production-804b.up.railway.app'
 ];
 
 app.use(cors({
