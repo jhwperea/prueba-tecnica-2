@@ -1,10 +1,9 @@
 import dotenv from "dotenv";
-import mysql from "mysql2/promise";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from 'url';
+import pg from "pg";
 
 dotenv.config();
+
+const { Pool } = pg;
 
 // Verificación rápida de que las variables sí se están leyendo del .env
 // (si esto imprime "undefined", el .env no se está cargando o no está en la ruta esperada)
@@ -15,32 +14,34 @@ console.log("DB config leída:", {
   DB_PORT: process.env.DB_PORT,
 });
 
-// Crear el pool de conexiones
-const pool = mysql.createPool({
+// Crear el pool de conexiones a PostgreSQL
+const pool = new Pool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME || "",
-  port: Number(process.env.DB_PORT) || 3306,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  dateStrings: true,
-  // Railway (y la mayoría de proveedores cloud de MySQL) aceptan conexión sin SSL
-  // por el puerto del proxy, pero si el error persiste probar con SSL:
+  port: Number(process.env.DB_PORT) || 5432,
+  max: 10, // máximo de conexiones en el pool (equivalente a connectionLimit)
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+  // La mayoría de proveedores cloud de Postgres (Railway, Render, Supabase, etc.)
+  // exigen SSL para conexiones externas. Si ves un error de tipo
+  // "no encryption" / "self signed certificate", descomenta esto:
   // ssl: { rejectUnauthorized: false },
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 10000,
 });
 
-pool.on("connection", () => {
+pool.on("connect", () => {
   console.log("Nueva conexión creada en el pool");
 });
 
-// Función para obtener una conexión
+pool.on("error", (err) => {
+  console.error("Error inesperado en un cliente inactivo del pool:", err);
+});
+
+// Función para obtener una conexión (cliente) del pool
 const getConnection = async () => {
   try {
-    const connection = await pool.getConnection();
+    const connection = await pool.connect();
     // console.log("Conexión obtenida del pool");
     return connection;
   } catch (error) {
@@ -52,7 +53,7 @@ const getConnection = async () => {
 // Función para liberar una conexión
 const releaseConnection = (connection) => {
   if (connection) {
-    connection.release(); // Devuelve la conexión al pool
+    connection.release(); // Devuelve el cliente al pool
     // console.log("Conexión liberada al pool");
   }
 };
@@ -64,11 +65,6 @@ const testConnection = async () => {
     connection = await getConnection();
     console.log(`Conexión exitosa a la base de datos ${process.env.DB_NAME} en ${process.env.DB_HOST}`);
     await connection.query("SELECT 1"); // Prueba simple
-    const __dirname = path.dirname(fileURLToPath(import.meta.url));
-    const sqlPath = path.join(__dirname, './database/generate.sql');
-    const sql = fs.readFileSync(sqlPath, 'utf8');
-    await connection.query(sql);
-    console.log("Archivo generate.sql ejecutado correctamente");
   } catch (error) {
     console.error("Error en la prueba de conexión:", error);
   } finally {
@@ -77,12 +73,13 @@ const testConnection = async () => {
 };
 
 // Función para ejecutar una consulta
+// Nota: pg usa placeholders posicionales $1, $2, ... en lugar de "?" como mysql2
 const executeQuery = async (query, params = [], connection) => {
   let connectionDb = null;
   try {
     connectionDb = connection ? connection : await getConnection();
-    const [results] = await connectionDb.execute(query, params);
-    return results;
+    const { rows } = await connectionDb.query(query, params);
+    return rows;
   } catch (error) {
     console.error("Error ejecutando la consulta:", error);
     throw error;
