@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
-    "db:create": "node ./src/common/configs/db.config.js"
+    "build": "echo 'No build step defined' && exit 0"
   },
   "keywords": [],
   "author": "",
