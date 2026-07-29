@@ -8,6 +8,7 @@ const init = (httpServer) => {
     cors: {
       origin: [
         "http://localhost:3000",
+        "https://frontend-production-804b.up.railway.app/"
       ],
       methods: ["GET", "POST", "PUT", "DELETE"],
       credentials: true,

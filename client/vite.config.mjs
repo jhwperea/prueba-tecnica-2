@@ -8,20 +8,24 @@ export default defineConfig(({ mode }) => {
   const API_URL = `${env.VITE_APP_BASE_NAME}`;
   const PORT = `${env.VITE_PORT}`;
 
+  const allowedHosts = [env.RAILWAY_PUBLIC_DOMAIN, '.up.railway.app', 'localhost'].filter(Boolean);
+
   return {
     server: {
       // this ensures that the browser opens upon server start
       open: true,
       // this sets a default port to 3000
       port: PORT,
-      host: true
+      host: true,
+      allowedHosts
     },
     build: {
       chunkSizeWarningLimit: 1600
     },
     preview: {
       open: true,
-      host: true
+      host: true,
+      allowedHosts
     },
     define: {
       global: 'window'
