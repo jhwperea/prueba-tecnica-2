@@ -11,7 +11,7 @@ export const getMenu = async ({ per, idu }) => {
     connection = await getConnection();
 
     const rowsv = await executeQuery(
-      `SELECT use_pages AS ven FROM tbl_users WHERE use_id = ? LIMIT 1`,
+      `SELECT use_pages AS ven FROM tbl_users WHERE use_id = $1 LIMIT 1`,
       [idu],
       connection
     );
@@ -23,7 +23,7 @@ export const getMenu = async ({ per, idu }) => {
 
     if (ven && ven.trim() !== "") {
       rows = await executeQuery(
-        `SELECT v.pag_id id, v.pag_description, v.pag_url toa, v.pag_icon icon, v.pag_order, v.pag_name label FROM tbl_pages v WHERE pag_parent = 0 AND v.pag_id IN(${ven}) ORDER BY v.pag_order`,
+        `SELECT v.pag_id AS id, v.pag_description, v.pag_url AS toa, v.pag_icon AS icon, v.pag_order, v.pag_name AS label FROM tbl_pages v WHERE pag_parent = 0 AND v.pag_id IN(${ven}) ORDER BY v.pag_order`,
         [],
         connection
       );
@@ -32,7 +32,7 @@ export const getMenu = async ({ per, idu }) => {
         datos.padres = rows;
 
         rows2 = await executeQuery(
-          `SELECT v.pag_id, v.pag_description, v.pag_parent padre, v.pag_url toa, v.pag_icon icon, v.pag_order, v.pag_name label FROM tbl_pages v WHERE pag_parent != 0 AND v.pag_id IN(${ven}) ORDER BY v.pag_order`,
+          `SELECT v.pag_id, v.pag_description, v.pag_parent AS padre, v.pag_url AS toa, v.pag_icon AS icon, v.pag_order, v.pag_name AS label FROM tbl_pages v WHERE pag_parent != 0 AND v.pag_id IN(${ven}) ORDER BY v.pag_order`,
           [],
           connection
         );
@@ -43,7 +43,7 @@ export const getMenu = async ({ per, idu }) => {
       }
     } else {
       rows = await executeQuery(
-        `SELECT v.pag_id id, v.pag_description, v.pag_url toa, v.pag_icon icon, v.pag_order, v.pag_name label FROM tbl_pages v JOIN tbl_page_permissions p ON v.pag_id = p.pag_id WHERE pag_parent = 0 AND p.pro_id = ? ORDER BY v.pag_order`,
+        `SELECT v.pag_id AS id, v.pag_description, v.pag_url AS toa, v.pag_icon AS icon, v.pag_order, v.pag_name AS label FROM tbl_pages v JOIN tbl_page_permissions p ON v.pag_id = p.pag_id WHERE pag_parent = 0 AND p.pro_id = $1 ORDER BY v.pag_order`,
         [per],
         connection
       );
@@ -52,7 +52,7 @@ export const getMenu = async ({ per, idu }) => {
         datos.padres = rows;
 
         rows2 = await executeQuery(
-          `SELECT v.pag_id, v.pag_description, v.pag_parent padre, v.pag_url toa, v.pag_icon icon, v.pag_order, v.pag_name label FROM tbl_pages v JOIN tbl_page_permissions p ON v.pag_id = p.pag_id WHERE pag_parent != 0 AND p.pro_id = ? ORDER BY v.pag_order`,
+          `SELECT v.pag_id, v.pag_description, v.pag_parent AS padre, v.pag_url AS toa, v.pag_icon AS icon, v.pag_order, v.pag_name AS label FROM tbl_pages v JOIN tbl_page_permissions p ON v.pag_id = p.pag_id WHERE pag_parent != 0 AND p.pro_id = $1 ORDER BY v.pag_order`,
           [per],
           connection
         );
@@ -75,7 +75,7 @@ export const getProfiles = async () => {
     connection = await getConnection();
 
     return await executeQuery(
-      `SELECT pro_id value, pro_name label FROM tbl_profiles WHERE sta_id = 1 ORDER BY label`,
+      `SELECT pro_id AS value, pro_name AS label FROM tbl_profiles WHERE sta_id = 1 ORDER BY label`,
       [],
       connection
     );
@@ -99,16 +99,16 @@ export const verifyToken = async (token) => {
 
     const rows = await executeQuery(
       `SELECT
-         u.use_id AS useId,
+         u.use_id AS "useId",
          u.use_user AS username,
          u.use_name AS name,
-         u.use_last_name AS lastName,
+         u.use_last_name AS "lastName",
          u.use_email AS email,
-         u.pro_id AS proId,
-         p.pro_name AS profileName
+         u.pro_id AS "proId",
+         p.pro_name AS "profileName"
        FROM tbl_users u
        LEFT JOIN tbl_profiles p ON u.pro_id = p.pro_id
-       WHERE u.use_id = ? AND u.use_email = ? AND u.sta_id IN (1,4) LIMIT 1`,
+       WHERE u.use_id = $1 AND u.use_email = $2 AND u.sta_id IN (1,4) LIMIT 1`,
       [decoded.useId, decoded.email],
       connection
     );
@@ -127,7 +127,7 @@ export const verifyToken = async (token) => {
       .trim();
 
     const rowsPermisos = await executeQuery(
-      `SELECT per_id AS perId FROM tbl_user_permissions WHERE use_id = ?`,
+      `SELECT per_id AS "perId" FROM tbl_user_permissions WHERE use_id = $1`,
       [decoded.useId],
       connection
     );
@@ -154,16 +154,18 @@ export const getUserPermissions = async ({ useId }) => {
     connection = await getConnection();
 
     const permissions = await executeQuery(
-      `SELECT per_id perId FROM tbl_user_permissions WHERE use_id = ?`,
+      `SELECT per_id AS "perId" FROM tbl_user_permissions WHERE use_id = $1`,
       [useId],
       connection
     );
 
+    // FIND_IN_SET no existe en Postgres: se reemplaza convirtiendo la lista
+    // separada por comas en un array y comprobando pertenencia con ANY().
     const windows = await executeQuery(
       `SELECT v.pag_url AS path
        FROM tbl_pages v
-       JOIN tbl_users u ON FIND_IN_SET(v.pag_id, u.use_pages) > 0
-       WHERE u.use_id = ?`,
+       JOIN tbl_users u ON v.pag_id::text = ANY(string_to_array(u.use_pages, ','))
+       WHERE u.use_id = $1`,
       [useId],
       connection
     );
@@ -179,18 +181,19 @@ export const getStatusesByScope = async ({ scope, excludesKeys = [] }) => {
   try {
     connection = await getConnection();
 
-    const whereConditions = ['sta_id != 3', 'sta_scope = ?'];
+    const whereConditions = ['sta_id != 3', 'sta_scope = $1'];
     const params = [scope];
 
     if (excludesKeys && excludesKeys.length > 0) {
-      whereConditions.push(`sta_key NOT IN (${excludesKeys.map(() => '?').join(',')})`);
+      const placeholders = excludesKeys.map((_, i) => `$${params.length + i + 1}`).join(',');
+      whereConditions.push(`sta_key NOT IN (${placeholders})`);
       params.push(...excludesKeys);
     }
 
     const whereClause = `WHERE ${whereConditions.join(" AND ")}`;
 
     return await executeQuery(
-      `SELECT sta_id value, sta_name label, sta_color FROM tbl_status ${whereClause} ORDER BY sta_order ASC`,
+      `SELECT sta_id AS value, sta_name AS label, sta_color FROM tbl_status ${whereClause} ORDER BY sta_order ASC`,
       params,
       connection
     );
@@ -205,7 +208,7 @@ export const getModules = async () => {
     connection = await getConnection();
 
     return await executeQuery(
-      `SELECT mod_id id, mod_nombre nombre FROM tbl_modulos`,
+      `SELECT mod_id AS id, mod_nombre AS nombre FROM tbl_modulos`,
       [],
       connection
     );

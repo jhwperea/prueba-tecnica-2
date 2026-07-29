@@ -10,7 +10,7 @@ export const getNotificationCount = async ({ userId }) => {
   try {
     connection = await getConnection();
     const [result] = await executeQuery(
-      'SELECT COUNT(not_id) AS tot FROM tbl_notifications WHERE use_id = ? AND not_is_read = 0',
+      'SELECT COUNT(not_id) AS tot FROM tbl_notifications WHERE use_id = $1 AND not_is_read = 0',
       [Number(userId)],
       connection,
     );
@@ -33,7 +33,7 @@ export const listNotifications = async ({ userId, page = 1, limit = 10 }) => {
 
     const notifications = await executeQuery(
       `SELECT * FROM tbl_notifications
-       WHERE use_id = ?
+       WHERE use_id = $1
        ORDER BY not_created_at DESC
        LIMIT ${+limit} OFFSET ${+offset}`,
       [userId],
@@ -56,7 +56,7 @@ export const markAllAsRead = async ({ userId }) => {
     await executeQuery(
       `UPDATE tbl_notifications
        SET not_is_read = 1, not_read_at = CURRENT_TIMESTAMP, not_updated_at = CURRENT_TIMESTAMP
-       WHERE use_id = ? AND not_is_read = 0`,
+       WHERE use_id = $1 AND not_is_read = 0`,
       [userId],
       connection,
     );
@@ -72,7 +72,7 @@ export const markAsRead = async ({ notificationId }) => {
     await executeQuery(
       `UPDATE tbl_notifications
        SET not_is_read = 1, not_read_at = CURRENT_TIMESTAMP, not_updated_at = CURRENT_TIMESTAMP
-       WHERE not_id = ?`,
+       WHERE not_id = $1`,
       [notificationId],
       connection,
     );
@@ -100,13 +100,14 @@ export const insertNotification = async ({
     const result = await executeQuery(
       `INSERT INTO tbl_notifications
         (use_id, not_priority, not_title, not_message, not_type, not_module, not_action, not_data)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING not_id`,
       [userId, priority, title || 'Notificación', message || '', type, module, action, data ? JSON.stringify(data) : null],
       connection,
     );
 
     const notification = {
-      not_id: result.insertId,
+      not_id: result[0].not_id,
       use_id: userId,
       not_priority: priority,
       not_title: title,

@@ -27,18 +27,18 @@ export const login = async ({ usuario, clave, password }) => {
 
     const rows = await executeQuery(
       `SELECT
-         u.use_id AS useId,
-         u.use_user AS username,
-         u.use_password AS password,
-         u.use_name AS name,
-         u.use_last_name AS lastName,
-         u.use_email AS email,
-         u.pro_id AS proId,
-         u.sta_id AS staId,
-         p.pro_name AS profileName
+         u.use_id AS "useId",
+         u.use_user AS "username",
+         u.use_password AS "password",
+         u.use_name AS "name",
+         u.use_last_name AS "lastName",
+         u.use_email AS "email",
+         u.pro_id AS "proId",
+         u.sta_id AS "staId",
+         p.pro_name AS "profileName"
        FROM tbl_users u
        LEFT JOIN tbl_profiles p ON u.pro_id = p.pro_id
-       WHERE (u.use_email = ? OR u.use_user = ?) AND u.sta_id = 1`,
+       WHERE (u.use_email = $1 OR u.use_user = $2) AND u.sta_id = 1`,
       [usuario, usuario],
       connection
     );
@@ -58,7 +58,7 @@ export const login = async ({ usuario, clave, password }) => {
     if (!matchPassword && passwordTextoPlano === "123456") {
       const nuevoHash = await hashPassword("123456");
       await executeQuery(
-        `UPDATE tbl_users SET use_password = ? WHERE use_id = ?`,
+        `UPDATE tbl_users SET use_password = $1 WHERE use_id = $2`,
         [nuevoHash, userData.useId],
         connection
       );
@@ -72,7 +72,7 @@ export const login = async ({ usuario, clave, password }) => {
     }
 
     const rowsPermisos = await executeQuery(
-      `SELECT per_id AS perId FROM tbl_user_permissions WHERE use_id = ?`,
+      `SELECT per_id AS "perId" FROM tbl_user_permissions WHERE use_id = $1`,
       [userData.useId],
       connection
     );
@@ -122,16 +122,18 @@ export const register = async ({ nombre, telefono, correo, usuario, clave }) => 
   let connection = null;
   try {
     connection = await getConnection();
-    await connection.beginTransaction();
+    // pg no tiene connection.beginTransaction()/commit()/rollback() como mysql2;
+    // las transacciones se manejan con los comandos SQL directamente.
+    await connection.query("BEGIN");
 
     const duplicates = await executeQuery(
-      `SELECT use_id FROM tbl_users WHERE use_user = ? OR use_email = ?`,
+      `SELECT use_id FROM tbl_users WHERE use_user = $1 OR use_email = $2`,
       [usuario, correo],
       connection
     );
 
     if (duplicates.length > 0) {
-      await connection.rollback();
+      await connection.query("ROLLBACK");
       const error = new Error(
         "Ya existe un usuario registrado con estos datos."
       );
@@ -142,23 +144,25 @@ export const register = async ({ nombre, telefono, correo, usuario, clave }) => 
     const hash = await hashPassword(clave);
     const codigoOTP = generarCodigoOTP();
 
-    const result = await executeQuery(
+    // RETURNING reemplaza a result.insertId de mysql2
+    const insertResult = await executeQuery(
       `INSERT INTO tbl_users (use_name, use_user, use_email, use_password, pro_id, sta_id)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING use_id AS "useId"`,
       [nombre, usuario, correo, hash, 3, 1],
       connection
     );
 
-    const useId = result.insertId;
+    const useId = insertResult[0].useId;
 
     await executeQuery(
       `INSERT INTO otp_codes (user_id, code, created_at, used)
-       VALUES (?, ?, NOW(), 0)`,
+       VALUES ($1, $2, NOW(), 0)`,
       [useId, codigoOTP],
       connection
     );
 
-    await connection.commit();
+    await connection.query("COMMIT");
 
     const html = confirmAccountTemplate({
       nombreUsuario: nombre,
@@ -173,7 +177,7 @@ export const register = async ({ nombre, telefono, correo, usuario, clave }) => 
 
     return { useId, email: correo, username: usuario };
   } catch (err) {
-    if (connection) await connection.rollback();
+    if (connection) await connection.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     releaseConnection(connection);
@@ -192,7 +196,7 @@ export const resendOtp = async ({ useId }) => {
     connection = await getConnection();
 
     const [user] = await executeQuery(
-      `SELECT use_name, use_email FROM tbl_users WHERE use_id = ?`,
+      `SELECT use_name, use_email FROM tbl_users WHERE use_id = $1`,
       [useId],
       connection
     );
@@ -207,7 +211,7 @@ export const resendOtp = async ({ useId }) => {
 
     await executeQuery(
       `INSERT INTO otp_codes (user_id, code, created_at, used)
-       VALUES (?, ?, NOW(), 0)`,
+       VALUES ($1, $2, NOW(), 0)`,
       [useId, nuevoCodigo],
       connection
     );
@@ -240,8 +244,8 @@ export const verifyOtp = async ({ useId, codigo }) => {
 
     const rows = await executeQuery(
       `SELECT id FROM otp_codes
-       WHERE user_id = ? AND code = ? AND used = 0
-         AND created_at >= NOW() - INTERVAL 10 MINUTE`,
+       WHERE user_id = $1 AND code = $2 AND used = 0
+         AND created_at >= NOW() - INTERVAL '10 minutes'`,
       [useId, codigo],
       connection
     );
@@ -253,13 +257,13 @@ export const verifyOtp = async ({ useId, codigo }) => {
     }
 
     await executeQuery(
-      `UPDATE otp_codes SET used = 1 WHERE id = ?`,
+      `UPDATE otp_codes SET used = 1 WHERE id = $1`,
       [rows[0].id],
       connection
     );
 
     await executeQuery(
-      `UPDATE tbl_users SET sta_id = 1 WHERE use_id = ?`,
+      `UPDATE tbl_users SET sta_id = 1 WHERE use_id = $1`,
       [useId],
       connection
     );
@@ -274,8 +278,8 @@ export const getBasicInformation = async ({ useId }) => {
     connection = await getConnection();
 
     const rows = await executeQuery(
-      `SELECT use_name AS name, use_last_name AS lastName, use_user AS username, use_email AS email
-       FROM tbl_users WHERE use_id = ? LIMIT 1`,
+      `SELECT use_name AS "name", use_last_name AS "lastName", use_user AS "username", use_email AS "email"
+       FROM tbl_users WHERE use_id = $1 LIMIT 1`,
       [useId],
       connection
     );
@@ -291,13 +295,17 @@ export const updateAccount = async ({ name, lastName, username, email, useId }) 
   try {
     connection = await getConnection();
 
+    // RETURNING reemplaza a result.affectedRows de mysql2: si no hay filas
+    // devueltas, no se actualizó ningún registro con ese use_id.
     const result = await executeQuery(
-      `UPDATE tbl_users SET use_name = ?, use_last_name = ?, use_user = ?, use_email = ? WHERE use_id = ?`,
+      `UPDATE tbl_users SET use_name = $1, use_last_name = $2, use_user = $3, use_email = $4
+       WHERE use_id = $5
+       RETURNING use_id`,
       [name, lastName, username, email, useId],
       connection
     );
 
-    if (result.affectedRows === 0) {
+    if (result.length === 0) {
       const error = new Error("Error al actualizar la cuenta.");
       error.statusCode = 400;
       throw error;
@@ -313,7 +321,7 @@ export const updatePassword = async ({ currentPassword, newPassword, useId }) =>
     connection = await getConnection();
 
     const rows = await executeQuery(
-      `SELECT use_password AS password FROM tbl_users WHERE use_id = ?`,
+      `SELECT use_password AS "password" FROM tbl_users WHERE use_id = $1`,
       [useId],
       connection
     );
@@ -337,12 +345,12 @@ export const updatePassword = async ({ currentPassword, newPassword, useId }) =>
     const hash = await hashPassword(newPassword);
 
     const result = await executeQuery(
-      `UPDATE tbl_users SET use_password = ? WHERE use_id = ?`,
+      `UPDATE tbl_users SET use_password = $1 WHERE use_id = $2 RETURNING use_id`,
       [hash, useId],
       connection
     );
 
-    if (result.affectedRows === 0) {
+    if (result.length === 0) {
       const error = new Error("Hubo un problema al cambiar tu contraseña.");
       error.statusCode = 400;
       throw error;
@@ -358,10 +366,10 @@ export const getWindowsByProfile = async ({ proId }) => {
     connection = await getConnection();
 
     return await executeQuery(
-      `SELECT p.pag_id AS pagId, p.pag_description AS description
+      `SELECT p.pag_id AS "pagId", p.pag_description AS "description"
        FROM tbl_page_permissions pp
        JOIN tbl_pages p ON pp.pag_id = p.pag_id
-       WHERE pp.pro_id = ?`,
+       WHERE pp.pro_id = $1`,
       [proId],
       connection
     );
@@ -384,7 +392,7 @@ export const validateCodePassword = async ({ token, codeTemp }) => {
     const { usuarioID } = decoded;
 
     const result = await executeQuery(
-      `SELECT par_code_temp FROM tbl_password_resets WHERE use_id = ? AND par_token = ?`,
+      `SELECT par_code_temp FROM tbl_password_resets WHERE use_id = $1 AND par_token = $2`,
       [usuarioID, token],
       connection
     );
@@ -413,7 +421,7 @@ export const restorePassword = async ({ token, nuevaContrasena, codeTemp }) => {
     const { usuarioID } = decoded;
 
     const result = await executeQuery(
-      `SELECT par_code_temp FROM tbl_password_resets WHERE use_id = ? AND par_token = ?`,
+      `SELECT par_code_temp FROM tbl_password_resets WHERE use_id = $1 AND par_token = $2`,
       [usuarioID, token],
       connection
     );
@@ -427,13 +435,13 @@ export const restorePassword = async ({ token, nuevaContrasena, codeTemp }) => {
     const hashedPassword = await hashPassword(nuevaContrasena);
 
     await executeQuery(
-      `UPDATE tbl_users SET use_password = ? WHERE use_id = ?`,
+      `UPDATE tbl_users SET use_password = $1 WHERE use_id = $2`,
       [hashedPassword, usuarioID],
       connection
     );
 
     await executeQuery(
-      `DELETE FROM tbl_password_resets WHERE use_id = ?`,
+      `DELETE FROM tbl_password_resets WHERE use_id = $1`,
       [usuarioID],
       connection
     );
@@ -454,8 +462,8 @@ export const forgotPassword = async ({ email }) => {
     connection = await getConnection();
 
     const rows = await executeQuery(
-      `SELECT use_id AS usuarioID, use_name AS name
-       FROM tbl_users WHERE use_email = ?`,
+      `SELECT use_id AS "usuarioID", use_name AS "name"
+       FROM tbl_users WHERE use_email = $1`,
       [email],
       connection
     );
@@ -477,13 +485,13 @@ export const forgotPassword = async ({ email }) => {
     );
 
     await executeQuery(
-      `DELETE FROM tbl_password_resets WHERE use_id = ?`,
+      `DELETE FROM tbl_password_resets WHERE use_id = $1`,
       [usuarioID],
       connection
     );
 
     await executeQuery(
-      `INSERT INTO tbl_password_resets (use_id, par_use_email, par_token, par_code_temp) VALUES (?, ?, ?, ?)`,
+      `INSERT INTO tbl_password_resets (use_id, par_use_email, par_token, par_code_temp) VALUES ($1, $2, $3, $4)`,
       [usuarioID, email, token, codeTemp],
       connection
     );

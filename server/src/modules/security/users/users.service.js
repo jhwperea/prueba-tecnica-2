@@ -19,9 +19,9 @@ export const getUsersByPermission = async ({ perId }) => {
 
     return await executeQuery(
       `SELECT
-         CONCAT(IFNULL(u.use_name,"")," ",IFNULL(u.use_last_name,"")) AS name,
-         u.use_id AS useId,
-         GROUP_CONCAT(pu.per_id) AS permissions
+         CONCAT(COALESCE(u.use_name,''),' ',COALESCE(u.use_last_name,'')) AS name,
+         u.use_id AS "useId",
+         STRING_AGG(pu.per_id::text, ',') AS permissions
        FROM tbl_user_permissions pu
        JOIN tbl_users u ON u.use_id = pu.use_id
        WHERE per_id IN (${permisos.join(",")}) AND u.sta_id != 3
@@ -44,8 +44,8 @@ export const getUsers = async ({ proId }) => {
     const params = [];
 
     if (proId) {
-      filtros.push("pro_id = ?");
       params.push(proId);
+      filtros.push(`pro_id = $${params.length}`);
     }
 
     const whereClause = filtros.length ? `WHERE ${filtros.join(" AND ")}` : "";
@@ -53,12 +53,12 @@ export const getUsers = async ({ proId }) => {
     return await executeQuery(
       `SELECT
          use_id AS value,
-         CONCAT(IFNULL(use_name, ''), ' ', IFNULL(use_last_name, '')) AS label,
+         CONCAT(COALESCE(use_name, ''), ' ', COALESCE(use_last_name, '')) AS label,
          use_email AS email,
          use_identification AS identification
        FROM tbl_users
        ${whereClause}
-       ORDER BY name ASC`,
+       ORDER BY label ASC`,
       params,
       connection
     );
@@ -142,24 +142,24 @@ export const paginationUsers = async ({
 
     const mainQuery = `
       SELECT
-        u.use_id AS useId,
+        u.use_id AS "useId",
         u.use_name AS name,
-        u.use_last_name AS lastName,
+        u.use_last_name AS "lastName",
         u.use_identification AS identification,
         u.use_user AS username,
         u.use_email AS email,
-        p.pro_name AS profileName,
-        e.sta_name AS statusName,
+        p.pro_name AS "profileName",
+        e.sta_name AS "statusName",
         u.use_access AS access,
-        u.use_change_password AS changePassword,
-        u.use_update_at AS updatedAt,
-        u.use_update_by AS updatedBy,
-        u.sta_id AS staId,
-        u.pro_id AS proId,
-        u.use_pages AS usePages
+        u.use_change_password AS "changePassword",
+        u.use_update_at AS "updatedAt",
+        u.use_update_by AS "updatedBy",
+        u.sta_id AS "staId",
+        u.pro_id AS "proId",
+        u.use_pages AS "usePages"
       ${from} ${whereClause}
       ORDER BY ${sortField} ${order}
-      LIMIT ${rows} OFFSET ${first}
+      LIMIT ${Number(rows)} OFFSET ${Number(first)}
     `;
 
     const countQuery = `
@@ -184,11 +184,11 @@ export const countUsers = async ({ useId }) => {
     const wh = +useId !== 1 ? "AND p.pro_id != 1" : "";
 
     return await executeQuery(
-      `SELECT COUNT(u.use_id) count, p.pro_name AS name, p.pro_id AS proId
+      `SELECT COUNT(u.use_id) count, p.pro_name AS name, p.pro_id AS "proId"
        FROM tbl_users u
        JOIN tbl_profiles p ON p.pro_id = u.pro_id
        WHERE u.sta_id != 3 AND p.sta_id = 1 ${wh}
-       GROUP BY proId, name
+       GROUP BY "proId", name
        ORDER BY p.pro_name`,
       [],
       connection
@@ -209,16 +209,16 @@ async function checkIfUserExists({
   const conditions = [];
 
   if (identification) {
-    conditions.push("use_identification = ?");
     parameters.push(identification);
+    conditions.push(`use_identification = $${parameters.length}`);
   }
   if (email) {
-    conditions.push("use_email = ?");
     parameters.push(email);
+    conditions.push(`use_email = $${parameters.length}`);
   }
   if (username) {
-    conditions.push("use_user = ?");
     parameters.push(username);
+    conditions.push(`use_user = $${parameters.length}`);
   }
 
   if (conditions.length === 0) return [];
@@ -256,18 +256,18 @@ export const saveUser = async ({
   let connection = null;
   try {
     connection = await getConnection();
-    await connection.beginTransaction();
+    await connection.query("BEGIN");
 
     if (ProfileMode) {
       if (!field) return;
 
       await executeQuery(
-        `UPDATE tbl_users SET ${field} = ? WHERE use_id = ?`,
+        `UPDATE tbl_users SET ${field} = $1 WHERE use_id = $2`,
         [value === "null" ? null : value, Number(useId)],
         connection
       );
 
-      await connection.commit();
+      await connection.query("COMMIT");
       return {
         message:
           "Modo perfil activado, Se actualizaron los cambios correctamente...",
@@ -293,11 +293,11 @@ export const saveUser = async ({
     if (useId > 0) {
       await executeQuery(
         `UPDATE tbl_users
-         SET use_name = ?, use_last_name = ?, use_identification = ?,
-             use_user = ?, use_email = ?, pro_id = ?, sta_id = ?,
-             use_access = ?, use_change_password = ?,
-             use_update_by = ?, use_pages = ?
-         WHERE use_id = ?`,
+         SET use_name = $1, use_last_name = $2, use_identification = $3,
+             use_user = $4, use_email = $5, pro_id = $6, sta_id = $7,
+             use_access = $8, use_change_password = $9,
+             use_update_by = $10, use_pages = $11
+         WHERE use_id = $12`,
         [
           name,
           lastName,
@@ -318,21 +318,22 @@ export const saveUser = async ({
       if (password) {
         const hash = await hashPassword(password);
         await executeQuery(
-          "UPDATE tbl_users SET use_password = ? WHERE use_id = ?",
+          "UPDATE tbl_users SET use_password = $1 WHERE use_id = $2",
           [hash, useId],
           connection
         );
       }
 
-      await connection.commit();
+      await connection.query("COMMIT");
       return { message: "Usuario Actualizado Correctamente", useId };
     }
 
-    const newUserId = await executeQuery(
+    const newUserResult = await executeQuery(
       `INSERT INTO tbl_users (use_name, use_last_name, use_identification, use_user,
          use_email, use_password, pro_id, sta_id, use_access,
          use_change_password, use_create_by, use_update_by, use_pages
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       RETURNING use_id AS "useId"`,
       [
         name,
         lastName,
@@ -351,26 +352,28 @@ export const saveUser = async ({
       connection
     );
 
-    if (!newUserId.insertId) {
+    if (!newUserResult.length || !newUserResult[0].useId) {
       const error = new Error("Error al insertar el usuario.");
       error.status = 400;
       throw error;
     }
 
+    const newUserId = newUserResult[0].useId;
+
     await executeQuery(
       `INSERT INTO tbl_user_permissions (per_id, use_id)
-       SELECT per_id, ? FROM tbl_profile_permissions WHERE pro_id = ?`,
-      [newUserId.insertId, proId],
+       SELECT per_id, $1 FROM tbl_profile_permissions WHERE pro_id = $2`,
+      [newUserId, proId],
       connection
     );
 
-    await connection.commit();
+    await connection.query("COMMIT");
     return {
       message: "Usuario Creado Correctamente",
-      useId: newUserId.insertId,
+      useId: newUserId,
     };
   } catch (err) {
-    if (connection) await connection.rollback();
+    if (connection) await connection.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     releaseConnection(connection);
@@ -389,16 +392,16 @@ export const deleteUser = async ({ useId, updatedBy }) => {
   let connection = null;
   try {
     connection = await getConnection();
-    await connection.beginTransaction();
+    await connection.query("BEGIN");
 
     const result = await executeQuery(
-      `UPDATE tbl_users SET sta_id = 3, use_update_by = ? WHERE use_id = ?`,
+      `UPDATE tbl_users SET sta_id = 3, use_update_by = $1 WHERE use_id = $2 RETURNING use_id`,
       [updatedBy, useId],
       connection
     );
 
-    if (result.affectedRows > 0) {
-      await connection.commit();
+    if (result.length > 0) {
+      await connection.query("COMMIT");
       return { message: "Usuario Eliminado Correctamente" };
     }
 
@@ -406,7 +409,7 @@ export const deleteUser = async ({ useId, updatedBy }) => {
     error.status = 404;
     throw error;
   } catch (err) {
-    if (connection) await connection.rollback();
+    if (connection) await connection.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     releaseConnection(connection);

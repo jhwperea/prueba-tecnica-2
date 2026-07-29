@@ -20,7 +20,7 @@ export const userHasPermission = async (useId, perId) => {
   try {
     connection = await getConnection();
     const rows = await executeQuery(
-      `SELECT 1 FROM tbl_user_permissions WHERE use_id = ? AND per_id = ? LIMIT 1`,
+      `SELECT 1 FROM tbl_user_permissions WHERE use_id = $1 AND per_id = $2 LIMIT 1`,
       [useId, perId],
       connection
     );

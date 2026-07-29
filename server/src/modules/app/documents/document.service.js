@@ -6,23 +6,23 @@ import {
 
 const SELECT_COLS = `
   SELECT
-    d.doc_id id,
-    d.doc_type docType,
-    d.doc_id_ref docIdRef,
-    CASE WHEN d.doc_extension = '' AND d.doc_mime_type = 'folder' THEN 'carpeta' ELSE 'archivo' END tipo,
-    d.doc_name nombre,
-    d.doc_path_storage docPathStorage,
-    d.doc_url url,
-    d.doc_extension extension,
-    d.doc_mime_type mimeType,
-    d.doc_size tamanio,
-    d.sta_id estado,
-    CONCAT(u.use_name, ' ', IFNULL(u.use_last_name, '')) usuReg,
-    d.doc_create_at fecReg,
-    d.doc_update_by usuAct,
-    d.doc_update_at fecAct,
-    d.doc_parent_id parentId,
-    (SELECT COUNT(*) FROM tbl_documents WHERE doc_parent_id = d.doc_id AND sta_id != 3) itemCount
+    d.doc_id AS id,
+    d.doc_type AS "docType",
+    d.doc_id_ref AS "docIdRef",
+    CASE WHEN d.doc_extension = '' AND d.doc_mime_type = 'folder' THEN 'carpeta' ELSE 'archivo' END AS tipo,
+    d.doc_name AS nombre,
+    d.doc_path_storage AS "docPathStorage",
+    d.doc_url AS url,
+    d.doc_extension AS extension,
+    d.doc_mime_type AS "mimeType",
+    d.doc_size AS tamanio,
+    d.sta_id AS estado,
+    CONCAT(u.use_name, ' ', COALESCE(u.use_last_name, '')) AS "usuReg",
+    d.doc_create_at AS "fecReg",
+    d.doc_update_by AS "usuAct",
+    d.doc_update_at AS "fecAct",
+    d.doc_parent_id AS "parentId",
+    (SELECT COUNT(*) FROM tbl_documents WHERE doc_parent_id = d.doc_id AND sta_id != 3) AS "itemCount"
 `;
 
 const FROM_JOIN = `
@@ -69,7 +69,7 @@ export const paginationModuleDocs = async ({
       ? `WHERE ${conditions.join(" AND ")}`
       : "";
 
-    const limit = paginate ? `LIMIT ${rows} OFFSET ${first}` : "";
+    const limit = paginate ? `LIMIT ${Number(rows)} OFFSET ${Number(first)}` : "";
 
     const mainQuery = `
       ${SELECT_COLS}
@@ -128,15 +128,16 @@ export const saveModuleDoc = async ({
   let connection = null;
   try {
     connection = await getConnection();
-    await connection.beginTransaction();
+    await connection.query("BEGIN");
 
     if (id > 0) {
       const update = await executeQuery(
         `UPDATE tbl_documents SET
-          doc_type = ?, doc_id_ref = ?, doc_name = ?, doc_path_storage = ?,
-          doc_url = ?, doc_extension = ?, doc_mime_type = ?, doc_size = ?,
-          sta_id = ?, doc_update_by = ?, doc_parent_id = ?
-         WHERE doc_id = ?`,
+          doc_type = $1, doc_id_ref = $2, doc_name = $3, doc_path_storage = $4,
+          doc_url = $5, doc_extension = $6, doc_mime_type = $7, doc_size = $8,
+          sta_id = $9, doc_update_by = $10, doc_parent_id = $11
+         WHERE doc_id = $12
+         RETURNING doc_id`,
         [
           docType, docIdRef, nombre, docPathStorage,
           url, extension, mimeType, tamanio,
@@ -146,13 +147,13 @@ export const saveModuleDoc = async ({
         connection,
       );
 
-      if (update.affectedRows === 0) {
+      if (update.length === 0) {
         const error = new Error("No se encontró el documento para actualizar.");
         error.status = 400;
         throw error;
       }
 
-      await connection.commit();
+      await connection.query("COMMIT");
       return { message: "Documento actualizado correctamente." };
     }
 
@@ -161,7 +162,8 @@ export const saveModuleDoc = async ({
         doc_type, doc_id_ref, doc_name, doc_path_storage, doc_url,
         doc_extension, doc_mime_type, doc_size, sta_id,
         doc_create_by, doc_update_by, doc_parent_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING doc_id AS "docId"`,
       [
         docType, docIdRef, nombre, docPathStorage, url,
         extension, mimeType, tamanio, estado,
@@ -172,20 +174,22 @@ export const saveModuleDoc = async ({
 
     console.log('[SAVE] insert result:', insert);
 
+    const newId = insert[0].docId;
+
     const verify = await executeQuery(
-      `SELECT doc_id, doc_name FROM tbl_documents WHERE doc_id = ?`,
-      [insert.insertId],
+      `SELECT doc_id, doc_name FROM tbl_documents WHERE doc_id = $1`,
+      [newId],
       connection,
     );
     console.log('[SAVE] verify:', verify);
 
-    await connection.commit();
+    await connection.query("COMMIT");
     return {
       message: "Documento registrado correctamente.",
-      id: insert.insertId,
+      id: newId,
     };
   } catch (err) {
-    if (connection) await connection.rollback();
+    if (connection) await connection.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     releaseConnection(connection);
@@ -196,11 +200,11 @@ export const deleteModuleDoc = async ({ id, usuAct }) => {
   let connection = null;
   try {
     connection = await getConnection();
-    await connection.beginTransaction();
+    await connection.query("BEGIN");
 
     const [doc] = await executeQuery(
-      `SELECT doc_id id, doc_type docType, doc_name nombre, doc_extension extension, doc_mime_type mimeType, doc_parent_id parentId
-       FROM tbl_documents WHERE doc_id = ?`,
+      `SELECT doc_id AS id, doc_type AS "docType", doc_name AS nombre, doc_extension AS extension, doc_mime_type AS "mimeType", doc_parent_id AS "parentId"
+       FROM tbl_documents WHERE doc_id = $1`,
       [id],
       connection,
     );
@@ -216,14 +220,14 @@ export const deleteModuleDoc = async ({ id, usuAct }) => {
     if (esCarpeta) {
       const deleteChildren = async (parentId) => {
         const children = await executeQuery(
-          `SELECT doc_id id FROM tbl_documents WHERE doc_parent_id = ? AND sta_id != 3`,
+          `SELECT doc_id AS id FROM tbl_documents WHERE doc_parent_id = $1 AND sta_id != 3`,
           [parentId],
           connection,
         );
         for (const child of children) {
           await deleteChildren(child.id);
           await executeQuery(
-            `UPDATE tbl_documents SET sta_id = 3, doc_update_by = ? WHERE doc_id = ?`,
+            `UPDATE tbl_documents SET sta_id = 3, doc_update_by = $1 WHERE doc_id = $2`,
             [usuAct, child.id],
             connection,
           );
@@ -233,21 +237,21 @@ export const deleteModuleDoc = async ({ id, usuAct }) => {
     }
 
     const del = await executeQuery(
-      `UPDATE tbl_documents SET sta_id = 3, doc_update_by = ? WHERE doc_id = ?`,
+      `UPDATE tbl_documents SET sta_id = 3, doc_update_by = $1 WHERE doc_id = $2 RETURNING doc_id`,
       [usuAct, id],
       connection,
     );
 
-    if (del.affectedRows === 0) {
+    if (del.length === 0) {
       const error = new Error("No se pudo eliminar el documento.");
       error.status = 400;
       throw error;
     }
 
-    await connection.commit();
+    await connection.query("COMMIT");
     return { message: "Documento eliminado correctamente." };
   } catch (err) {
-    if (connection) await connection.rollback();
+    if (connection) await connection.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     releaseConnection(connection);

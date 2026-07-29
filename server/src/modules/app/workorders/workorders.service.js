@@ -11,21 +11,21 @@ import {
 } from "./workorders.constants.js";
 
 const ORDER_SELECT = `
-  o.ord_id AS ordId,
-  o.bik_id AS bikId,
-  o.ord_entry_date AS entryDate,
-  o.ord_fault_description AS faultDescription,
+  o.ord_id AS "ordId",
+  o.bik_id AS "bikId",
+  o.ord_entry_date AS "entryDate",
+  o.ord_fault_description AS "faultDescription",
   o.ord_status AS status,
   o.ord_total AS total,
-  o.ord_create_at AS createdAt,
+  o.ord_create_at AS "createdAt",
   b.bik_plate AS placa,
   b.bik_brand AS brand,
   b.bik_model AS model,
   b.bik_cylinder AS cylinder,
-  c.cli_id AS cliId,
-  c.cli_name AS clientName,
-  c.cli_phone AS clientPhone,
-  c.cli_email AS clientEmail
+  c.cli_id AS "cliId",
+  c.cli_name AS "clientName",
+  c.cli_phone AS "clientPhone",
+  c.cli_email AS "clientEmail"
 `;
 
 const ORDER_FROM = `
@@ -39,7 +39,7 @@ const ORDER_FROM = `
  */
 const recalculateOrderTotal = async (ordId, connection) => {
   const items = await executeQuery(
-    `SELECT item_count AS count, item_unit_value AS unitValue FROM tbl_work_order_items WHERE ord_id = ?`,
+    `SELECT item_count AS count, item_unit_value AS "unitValue" FROM tbl_work_order_items WHERE ord_id = $1`,
     [ordId],
     connection
   );
@@ -50,7 +50,7 @@ const recalculateOrderTotal = async (ordId, connection) => {
   );
 
   await executeQuery(
-    `UPDATE tbl_work_orders SET ord_total = ? WHERE ord_id = ?`,
+    `UPDATE tbl_work_orders SET ord_total = $1 WHERE ord_id = $2`,
     [total.toFixed(2), ordId],
     connection
   );
@@ -83,9 +83,9 @@ const mapOrderRow = (row) => ({
 
 const getItemsByOrder = async (ordId, connection) =>
   executeQuery(
-    `SELECT item_id AS itemId, ord_id AS ordId, item_type AS type, item_description AS description,
-            item_count AS count, item_unit_value AS unitValue, item_create_at AS createdAt
-     FROM tbl_work_order_items WHERE ord_id = ? ORDER BY item_create_at ASC`,
+    `SELECT item_id AS "itemId", ord_id AS "ordId", item_type AS type, item_description AS description,
+            item_count AS count, item_unit_value AS "unitValue", item_create_at AS "createdAt"
+     FROM tbl_work_order_items WHERE ord_id = $1 ORDER BY item_create_at ASC`,
     [ordId],
     connection
   );
@@ -93,19 +93,19 @@ const getItemsByOrder = async (ordId, connection) =>
 const getHistoryByOrder = async (ordId, connection) =>
   executeQuery(
     `SELECT
-       h.his_id AS hisId,
-       h.ord_id AS ordId,
-       h.his_from_status AS fromStatus,
-       h.his_to_status AS toStatus,
+       h.his_id AS "hisId",
+       h.ord_id AS "ordId",
+       h.his_from_status AS "fromStatus",
+       h.his_to_status AS "toStatus",
        h.his_note AS note,
-       h.his_create_at AS createdAt,
-       u.use_id AS useId,
-       CONCAT(IFNULL(u.use_name, ''), ' ', IFNULL(u.use_last_name, '')) AS userName,
-       p.pro_name AS profileName
+       h.his_create_at AS "createdAt",
+       u.use_id AS "useId",
+       CONCAT(COALESCE(u.use_name, ''), ' ', COALESCE(u.use_last_name, '')) AS "userName",
+       p.pro_name AS "profileName"
      FROM tbl_work_order_status_history h
      LEFT JOIN tbl_users u ON h.use_id = u.use_id
      LEFT JOIN tbl_profiles p ON u.pro_id = p.pro_id
-     WHERE h.ord_id = ?
+     WHERE h.ord_id = $1
      ORDER BY h.his_create_at DESC`,
     [ordId],
     connection
@@ -113,7 +113,7 @@ const getHistoryByOrder = async (ordId, connection) =>
 
 const getFullOrder = async (ordId, connection) => {
   const rows = await executeQuery(
-    `SELECT ${ORDER_SELECT} ${ORDER_FROM} WHERE o.ord_id = ? LIMIT 1`,
+    `SELECT ${ORDER_SELECT} ${ORDER_FROM} WHERE o.ord_id = $1 LIMIT 1`,
     [ordId],
     connection
   );
@@ -144,10 +144,10 @@ export const createWorkOrder = async ({ bikId, faultDescription, useBy }) => {
   let connection = null;
   try {
     connection = await getConnection();
-    await connection.beginTransaction();
+    await connection.query("BEGIN");
 
     const bike = await executeQuery(
-      `SELECT bik_id FROM tbl_bikes WHERE bik_id = ? AND sta_id != 3 LIMIT 1`,
+      `SELECT bik_id FROM tbl_bikes WHERE bik_id = $1 AND sta_id != 3 LIMIT 1`,
       [bikId],
       connection
     );
@@ -159,25 +159,26 @@ export const createWorkOrder = async ({ bikId, faultDescription, useBy }) => {
 
     const insertResult = await executeQuery(
       `INSERT INTO tbl_work_orders (bik_id, ord_entry_date, ord_fault_description, ord_status, ord_total, ord_create_by, ord_update_by)
-       VALUES (?, NOW(), ?, ?, 0.00, ?, ?)`,
+       VALUES ($1, NOW(), $2, $3, 0.00, $4, $5)
+       RETURNING ord_id AS "ordId"`,
       [bikId, faultDescription.trim(), ORDER_STATUS.RECIBIDA, useBy, useBy],
       connection
     );
 
-    const ordId = insertResult.insertId;
+    const ordId = insertResult[0].ordId;
 
     await executeQuery(
       `INSERT INTO tbl_work_order_status_history (ord_id, his_from_status, his_to_status, his_note, use_id)
-       VALUES (?, NULL, ?, ?, ?)`,
+       VALUES ($1, NULL, $2, $3, $4)`,
       [ordId, ORDER_STATUS.RECIBIDA, "Creación de orden de trabajo en taller.", useBy],
       connection
     );
 
-    await connection.commit();
+    await connection.query("COMMIT");
 
     return await getFullOrder(ordId, connection);
   } catch (err) {
-    if (connection) await connection.rollback();
+    if (connection) await connection.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     releaseConnection(connection);
@@ -219,7 +220,7 @@ export const paginationWorkOrders = async ({
       ${ORDER_FROM}
       ${whereClause}
       ORDER BY ${sortColumn} ${order}
-      LIMIT ${rows} OFFSET ${first}
+      LIMIT ${Number(rows)} OFFSET ${Number(first)}
     `;
 
     const countQuery = `SELECT COUNT(DISTINCT o.ord_id) tot ${ORDER_FROM} ${whereClause}`;
@@ -254,7 +255,7 @@ export const getOrderHistory = async ({ ordId, userId }) => {
   try {
     connection = await getConnection();
 
-    const order = await executeQuery(`SELECT ord_id FROM tbl_work_orders WHERE ord_id = ?`, [ordId], connection);
+    const order = await executeQuery(`SELECT ord_id FROM tbl_work_orders WHERE ord_id = $1`, [ordId], connection);
     if (!order.length) {
       const error = new Error(`Orden de trabajo con ID ${ordId} no encontrada.`);
       error.status = 404;
@@ -287,10 +288,10 @@ export const updateOrderStatus = async ({ ordId, nextStatus, note, useId }) => {
   let connection = null;
   try {
     connection = await getConnection();
-    await connection.beginTransaction();
+    await connection.query("BEGIN");
 
     const orderRows = await executeQuery(
-      `SELECT ord_status AS status FROM tbl_work_orders WHERE ord_id = ? LIMIT 1`,
+      `SELECT ord_status AS status FROM tbl_work_orders WHERE ord_id = $1 LIMIT 1`,
       [ordId],
       connection
     );
@@ -341,23 +342,23 @@ export const updateOrderStatus = async ({ ordId, nextStatus, note, useId }) => {
     }
 
     await executeQuery(
-      `UPDATE tbl_work_orders SET ord_status = ?, ord_update_by = ? WHERE ord_id = ?`,
+      `UPDATE tbl_work_orders SET ord_status = $1, ord_update_by = $2 WHERE ord_id = $3`,
       [nextStatus, useId, ordId],
       connection
     );
 
     await executeQuery(
       `INSERT INTO tbl_work_order_status_history (ord_id, his_from_status, his_to_status, his_note, use_id)
-       VALUES (?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5)`,
       [ordId, currentStatus, nextStatus, note ? note.trim() : null, useId],
       connection
     );
 
-    await connection.commit();
+    await connection.query("COMMIT");
 
     return await getFullOrder(ordId, connection);
   } catch (err) {
-    if (connection) await connection.rollback();
+    if (connection) await connection.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     releaseConnection(connection);
@@ -370,10 +371,10 @@ export const addOrderItem = async ({ ordId, type, description, count, unitValue 
   let connection = null;
   try {
     connection = await getConnection();
-    await connection.beginTransaction();
+    await connection.query("BEGIN");
 
     const orderRows = await executeQuery(
-      `SELECT ord_status AS status FROM tbl_work_orders WHERE ord_id = ? LIMIT 1`,
+      `SELECT ord_status AS status FROM tbl_work_orders WHERE ord_id = $1 LIMIT 1`,
       [ordId],
       connection
     );
@@ -418,21 +419,22 @@ export const addOrderItem = async ({ ordId, type, description, count, unitValue 
 
     const insertResult = await executeQuery(
       `INSERT INTO tbl_work_order_items (ord_id, item_type, item_description, item_count, item_unit_value)
-       VALUES (?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING item_id AS "itemId"`,
       [ordId, type, description.trim(), countNum, valueNum.toFixed(2)],
       connection
     );
 
     await recalculateOrderTotal(ordId, connection);
 
-    await connection.commit();
+    await connection.query("COMMIT");
 
     const order = await getFullOrder(ordId, connection);
-    const newItem = order.items.find((i) => i.itemId === insertResult.insertId);
+    const newItem = order.items.find((i) => i.itemId === insertResult[0].itemId);
 
     return { item: newItem, workOrder: order };
   } catch (err) {
-    if (connection) await connection.rollback();
+    if (connection) await connection.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     releaseConnection(connection);
@@ -450,10 +452,10 @@ export const deleteOrderItem = async ({ itemId, useId }) => {
   let connection = null;
   try {
     connection = await getConnection();
-    await connection.beginTransaction();
+    await connection.query("BEGIN");
 
     const itemRows = await executeQuery(
-      `SELECT ord_id AS ordId FROM tbl_work_order_items WHERE item_id = ? LIMIT 1`,
+      `SELECT ord_id AS "ordId" FROM tbl_work_order_items WHERE item_id = $1 LIMIT 1`,
       [itemId],
       connection
     );
@@ -467,7 +469,7 @@ export const deleteOrderItem = async ({ itemId, useId }) => {
     const ordId = itemRows[0].ordId;
 
     const orderRows = await executeQuery(
-      `SELECT ord_status AS status FROM tbl_work_orders WHERE ord_id = ? LIMIT 1`,
+      `SELECT ord_status AS status FROM tbl_work_orders WHERE ord_id = $1 LIMIT 1`,
       [ordId],
       connection
     );
@@ -478,17 +480,17 @@ export const deleteOrderItem = async ({ itemId, useId }) => {
       throw error;
     }
 
-    await executeQuery(`DELETE FROM tbl_work_order_items WHERE item_id = ?`, [itemId], connection);
+    await executeQuery(`DELETE FROM tbl_work_order_items WHERE item_id = $1`, [itemId], connection);
 
     await recalculateOrderTotal(ordId, connection);
 
-    await connection.commit();
+    await connection.query("COMMIT");
 
     const workOrder = await getFullOrder(ordId, connection);
 
     return { message: "Ítem eliminado con éxito.", workOrder };
   } catch (err) {
-    if (connection) await connection.rollback();
+    if (connection) await connection.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     releaseConnection(connection);

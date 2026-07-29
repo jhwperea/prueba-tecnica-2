@@ -16,8 +16,8 @@ export const searchBikesByPlate = async ({ plate }) => {
     const where = ["b.sta_id != 3"];
     const params = [];
     if (plate && plate.trim()) {
-      where.push("b.bik_plate LIKE ?");
       params.push(`%${plate.trim().toUpperCase()}%`);
+      where.push(`b.bik_plate LIKE $${params.length}`);
     }
 
     return await executeQuery(
@@ -27,11 +27,11 @@ export const searchBikesByPlate = async ({ plate }) => {
          b.bik_brand AS brand,
          b.bik_model AS model,
          b.bik_cylinder AS cylinder,
-         b.cli_id AS cliId,
-         c.cli_id AS clientCliId,
-         c.cli_name AS clientName,
-         c.cli_phone AS clientPhone,
-         c.cli_email AS clientEmail
+         b.cli_id AS "cliId",
+         c.cli_id AS "clientCliId",
+         c.cli_name AS "clientName",
+         c.cli_phone AS "clientPhone",
+         c.cli_email AS "clientEmail"
        FROM tbl_bikes b
        JOIN tbl_clients c ON b.cli_id = c.cli_id
        WHERE ${where.join(" AND ")}
@@ -102,20 +102,20 @@ export const paginationBikes = async ({
 
     const mainQuery = `
       SELECT
-        b.bik_id AS bikId,
+        b.bik_id AS "bikId",
         b.bik_plate AS plate,
         b.bik_brand AS brand,
         b.bik_model AS model,
         b.bik_cylinder AS cylinder,
-        b.cli_id AS cliId,
-        c.cli_name AS clientName,
-        c.cli_phone AS clientPhone,
-        b.sta_id AS staId,
-        e.sta_name AS statusName,
-        b.bik_update_at AS updatedAt
+        b.cli_id AS "cliId",
+        c.cli_name AS "clientName",
+        c.cli_phone AS "clientPhone",
+        b.sta_id AS "staId",
+        e.sta_name AS "statusName",
+        b.bik_update_at AS "updatedAt"
       ${fromClause} ${whereClause}
       ORDER BY ${sortColumn} ${order}
-      LIMIT ${rows} OFFSET ${first}
+      LIMIT ${Number(rows)} OFFSET ${Number(first)}
     `;
 
     const countQuery = `SELECT COUNT(DISTINCT b.bik_id) tot ${fromClause} ${whereClause}`;
@@ -165,10 +165,10 @@ export const saveBike = async ({
   let connection = null;
   try {
     connection = await getConnection();
-    await connection.beginTransaction();
+    await connection.query("BEGIN");
 
     const client = await executeQuery(
-      `SELECT cli_id FROM tbl_clients WHERE cli_id = ? AND sta_id != 3 LIMIT 1`,
+      `SELECT cli_id FROM tbl_clients WHERE cli_id = $1 AND sta_id != 3 LIMIT 1`,
       [cliId],
       connection
     );
@@ -180,7 +180,7 @@ export const saveBike = async ({
 
     const duplicateWhere = bikId > 0 ? `AND bik_id != ${Number(bikId)}` : "";
     const existing = await executeQuery(
-      `SELECT bik_id FROM tbl_bikes WHERE bik_plate = ? AND sta_id != 3 ${duplicateWhere} LIMIT 1`,
+      `SELECT bik_id FROM tbl_bikes WHERE bik_plate = $1 AND sta_id != 3 ${duplicateWhere} LIMIT 1`,
       [formattedPlate],
       connection
     );
@@ -193,36 +193,38 @@ export const saveBike = async ({
     if (bikId > 0) {
       const result = await executeQuery(
         `UPDATE tbl_bikes
-         SET bik_plate = ?, bik_brand = ?, bik_model = ?, bik_cylinder = ?, cli_id = ?, sta_id = ?, bik_update_by = ?
-         WHERE bik_id = ?`,
+         SET bik_plate = $1, bik_brand = $2, bik_model = $3, bik_cylinder = $4, cli_id = $5, sta_id = $6, bik_update_by = $7
+         WHERE bik_id = $8
+         RETURNING bik_id`,
         [formattedPlate, brand.trim(), model.trim(), cylinder ? String(cylinder).trim() : null, cliId, staId || 1, useBy, bikId],
         connection
       );
 
-      if (result.affectedRows === 0) {
+      if (result.length === 0) {
         const error = new Error("No se encontró la moto para ser actualizada.");
         error.status = 400;
         throw error;
       }
 
-      await connection.commit();
+      await connection.query("COMMIT");
       return { message: `Moto ${formattedPlate} actualizada correctamente.`, bikId };
     }
 
     const insertResult = await executeQuery(
       `INSERT INTO tbl_bikes (bik_plate, bik_brand, bik_model, bik_cylinder, cli_id, sta_id, bik_create_by, bik_update_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING bik_id AS "bikId"`,
       [formattedPlate, brand.trim(), model.trim(), cylinder ? String(cylinder).trim() : null, cliId, staId || 1, useBy, useBy],
       connection
     );
 
-    await connection.commit();
+    await connection.query("COMMIT");
     return {
       message: `Moto ${formattedPlate} creada correctamente.`,
-      bikId: insertResult.insertId,
+      bikId: insertResult[0].bikId,
     };
   } catch (err) {
-    if (connection) await connection.rollback();
+    if (connection) await connection.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     releaseConnection(connection);
@@ -233,10 +235,10 @@ export const deleteBike = async ({ bikId, updatedBy }) => {
   let connection = null;
   try {
     connection = await getConnection();
-    await connection.beginTransaction();
+    await connection.query("BEGIN");
 
     const ordersInUse = await executeQuery(
-      `SELECT ord_id FROM tbl_work_orders WHERE bik_id = ? LIMIT 1`,
+      `SELECT ord_id FROM tbl_work_orders WHERE bik_id = $1 LIMIT 1`,
       [bikId],
       connection
     );
@@ -249,21 +251,21 @@ export const deleteBike = async ({ bikId, updatedBy }) => {
     }
 
     const result = await executeQuery(
-      `UPDATE tbl_bikes SET sta_id = 3, bik_update_by = ? WHERE bik_id = ?`,
+      `UPDATE tbl_bikes SET sta_id = 3, bik_update_by = $1 WHERE bik_id = $2 RETURNING bik_id`,
       [updatedBy, bikId],
       connection
     );
 
-    if (result.affectedRows === 0) {
+    if (result.length === 0) {
       const error = new Error("Moto no encontrada o no se pudo eliminar.");
       error.status = 404;
       throw error;
     }
 
-    await connection.commit();
+    await connection.query("COMMIT");
     return { message: "Moto eliminada correctamente." };
   } catch (err) {
-    if (connection) await connection.rollback();
+    if (connection) await connection.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     releaseConnection(connection);

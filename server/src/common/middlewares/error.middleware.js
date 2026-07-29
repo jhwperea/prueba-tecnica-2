@@ -2,9 +2,10 @@ const errorMiddleware = (err, req, res, next) => {
   // Registrar el error para depuración
   console.error(`[ERROR]: ${err.stack || err.message}`);
 
-  // **1. Manejo específico de errores de MySQL**
+  // **1. Manejo específico de errores de base de datos**
   if (err.code) {
     switch (err.code) {
+      // ---- Códigos de mysql2 (legado, por si queda alguna ruta sin migrar) ----
       case "ER_WRONG_VALUE_COUNT_ON_ROW":
         return res.status(400).json({
           success: false,
@@ -60,11 +61,82 @@ const errorMiddleware = (err, req, res, next) => {
             "Demasiadas conexiones abiertas con la base de datos. Contacta a sistemas.",
         });
 
+      // ---- Códigos SQLSTATE de PostgreSQL (pg) ----
+      case "23505": // unique_violation
+        return res.status(409).json({
+          success: false,
+          message:
+            "Intento de duplicar un valor único en la base de datos. Contacta a sistemas.",
+        });
+
+      case "23503": // foreign_key_violation
+        return res.status(400).json({
+          success: false,
+          message:
+            "Violación de integridad referencial en la base de datos. Contacta a sistemas.",
+        });
+
+      case "23502": // not_null_violation
+        return res.status(400).json({
+          success: false,
+          message:
+            "Uno o más parámetros obligatorios están vacíos. Contacta a sistemas.",
+        });
+
+      case "22P02": // invalid_text_representation (tipo de dato inválido)
+        return res.status(400).json({
+          success: false,
+          message:
+            "Uno o más parámetros tienen un formato inválido. Contacta a sistemas.",
+        });
+
+      case "42601": // syntax_error
+      case "42703": // undefined_column
+      case "42P01": // undefined_table
+        return res.status(400).json({
+          success: false,
+          message: "Error de sintaxis en la consulta SQL. Contacta a sistemas.",
+          ...(process.env.NODE_ENV !== "production" && { detail: err.message }),
+        });
+
+      case "28P01": // invalid_password
+      case "28000": // invalid_authorization_specification
+        return res.status(403).json({
+          success: false,
+          message: "Acceso denegado a la base de datos. Contacta a sistemas.",
+        });
+
+      case "3D000": // invalid_catalog_name (la base de datos no existe)
+        return res.status(500).json({
+          success: false,
+          message: "La base de datos configurada no existe. Contacta a sistemas.",
+        });
+
+      case "08006": // connection_failure
+      case "08001": // sqlclient_unable_to_establish_sqlconnection
+        return res.status(503).json({
+          success: false,
+          message:
+            "Conexión con la base de datos perdida. Contacta a sistemas.",
+        });
+
+      case "53300": // too_many_connections
+        return res.status(503).json({
+          success: false,
+          message:
+            "Demasiadas conexiones abiertas con la base de datos. Contacta a sistemas.",
+        });
+
       default:
-        // Si el error de MySQL no está controlado específicamente
+        // Si el error de base de datos no está controlado específicamente
         return res.status(500).json({
           success: false,
           message: `Error desconocido de base de datos. Contacta a sistemas.`,
+          // En desarrollo, mostrar el código y mensaje real para poder depurar
+          ...(process.env.NODE_ENV !== "production" && {
+            code: err.code,
+            detail: err.message,
+          }),
         });
     }
   }

@@ -35,7 +35,7 @@ export const verifyToken = async (req, res, next) => {
       }
 
       const rows = await executeQuery(
-        `SELECT use_id FROM tbl_users WHERE use_id = ? AND use_email = ? AND sta_id = 1 LIMIT 1`,
+        `SELECT use_id FROM tbl_users WHERE use_id = $1 AND use_email = $2 AND sta_id = 1 LIMIT 1`,
         [decoded.useId, decoded.email],
         connection
       );

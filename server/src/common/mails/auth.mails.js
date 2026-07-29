@@ -46,7 +46,7 @@ authMailsRoutes.post("/restore_credentials_access", async (req, res, next) => {
 
         // Guardar información en la base de datos
         await executeQuery(
-          "INSERT INTO tbl_recuperar_cuenta (usu_id, usu_email, res_token, res_code_temp) VALUES (?, ?, ?, ?)",
+          "INSERT INTO tbl_recuperar_cuenta (usu_id, usu_email, res_token, res_code_temp) VALUES ($1, $2, $3, $4)",
           [usuId, correo, token, codeTemp],
           connection
         );
@@ -65,7 +65,7 @@ authMailsRoutes.post("/restore_credentials_access", async (req, res, next) => {
       });
     } else if (correo) {
       const rows = await executeQuery(
-        "SELECT usu_id usuId, CONCAT(IFNULL(usu_nombre, ''), ' ', IFNULL(usu_apellido, '')) nombre, est_id estado FROM tbl_usuarios WHERE usu_correo = ?",
+        'SELECT usu_id AS "usuId", CONCAT(COALESCE(usu_nombre, \'\'), \' \', COALESCE(usu_apellido, \'\')) AS nombre, est_id AS estado FROM tbl_usuarios WHERE usu_correo = $1',
         [correo],
         connection
       );
@@ -102,7 +102,7 @@ authMailsRoutes.post("/restore_credentials_access", async (req, res, next) => {
       });
 
       await executeQuery(
-        "INSERT INTO tbl_recuperar_cuenta (usu_id, usu_email, res_token, res_code_temp) VALUES (?, ?, ?, ?)",
+        "INSERT INTO tbl_recuperar_cuenta (usu_id, usu_email, res_token, res_code_temp) VALUES ($1, $2, $3, $4)",
         [usuId, correo, token, codeTemp],
         connection
       );

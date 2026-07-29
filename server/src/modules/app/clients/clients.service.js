@@ -58,23 +58,23 @@ export const paginationClients = async ({
       name: "c.cli_name",
       phone: "c.cli_phone",
       email: "c.cli_email",
-      bikesCount: "bikesCount",
+      bikesCount: '"bikesCount"',
     };
     const sortColumn = sortColumnMap[sortField] || "c.cli_name";
 
     const mainQuery = `
       SELECT
-        c.cli_id AS cliId,
+        c.cli_id AS "cliId",
         c.cli_name AS name,
         c.cli_phone AS phone,
         c.cli_email AS email,
-        c.sta_id AS staId,
-        e.sta_name AS statusName,
-        (SELECT COUNT(*) FROM tbl_bikes b WHERE b.cli_id = c.cli_id AND b.sta_id != 3) AS bikesCount,
-        c.cli_update_at AS updatedAt
+        c.sta_id AS "staId",
+        e.sta_name AS "statusName",
+        (SELECT COUNT(*) FROM tbl_bikes b WHERE b.cli_id = c.cli_id AND b.sta_id != 3) AS "bikesCount",
+        c.cli_update_at AS "updatedAt"
       ${fromClause} ${whereClause}
       ORDER BY ${sortColumn} ${order}
-      LIMIT ${rows} OFFSET ${first}
+      LIMIT ${Number(rows)} OFFSET ${Number(first)}
     `;
 
     const countQuery = `SELECT COUNT(DISTINCT c.cli_id) tot ${fromClause} ${whereClause}`;
@@ -94,8 +94,8 @@ export const getClientById = async ({ cliId }) => {
     connection = await getConnection();
 
     const rows = await executeQuery(
-      `SELECT cli_id AS cliId, cli_name AS name, cli_phone AS phone, cli_email AS email, sta_id AS staId
-       FROM tbl_clients WHERE cli_id = ? LIMIT 1`,
+      `SELECT cli_id AS "cliId", cli_name AS name, cli_phone AS phone, cli_email AS email, sta_id AS "staId"
+       FROM tbl_clients WHERE cli_id = $1 LIMIT 1`,
       [cliId],
       connection
     );
@@ -107,8 +107,8 @@ export const getClientById = async ({ cliId }) => {
     }
 
     const bikes = await executeQuery(
-      `SELECT bik_id AS bikId, bik_plate AS plate, bik_brand AS brand, bik_model AS model, bik_cylinder AS cylinder
-       FROM tbl_bikes WHERE cli_id = ? AND sta_id != 3 ORDER BY bik_plate ASC`,
+      `SELECT bik_id AS "bikId", bik_plate AS plate, bik_brand AS brand, bik_model AS model, bik_cylinder AS cylinder
+       FROM tbl_bikes WHERE cli_id = $1 AND sta_id != 3 ORDER BY bik_plate ASC`,
       [cliId],
       connection
     );
@@ -134,41 +134,43 @@ export const saveClient = async ({ cliId, name, phone, email, staId, useBy }) =>
   let connection = null;
   try {
     connection = await getConnection();
-    await connection.beginTransaction();
+    await connection.query("BEGIN");
 
     if (cliId > 0) {
       const result = await executeQuery(
         `UPDATE tbl_clients
-         SET cli_name = ?, cli_phone = ?, cli_email = ?, sta_id = ?, cli_update_by = ?
-         WHERE cli_id = ?`,
+         SET cli_name = $1, cli_phone = $2, cli_email = $3, sta_id = $4, cli_update_by = $5
+         WHERE cli_id = $6
+         RETURNING cli_id`,
         [name.trim(), phone.trim(), email ? email.trim() : null, staId || 1, useBy, cliId],
         connection
       );
 
-      if (result.affectedRows === 0) {
+      if (result.length === 0) {
         const error = new Error("No se encontró el cliente para ser actualizado.");
         error.status = 400;
         throw error;
       }
 
-      await connection.commit();
+      await connection.query("COMMIT");
       return { message: `Cliente ${name} actualizado correctamente.`, cliId };
     }
 
     const insertResult = await executeQuery(
       `INSERT INTO tbl_clients (cli_name, cli_phone, cli_email, sta_id, cli_create_by, cli_update_by)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING cli_id AS "cliId"`,
       [name.trim(), phone.trim(), email ? email.trim() : null, staId || 1, useBy, useBy],
       connection
     );
 
-    await connection.commit();
+    await connection.query("COMMIT");
     return {
       message: `Cliente ${name} creado correctamente.`,
-      cliId: insertResult.insertId,
+      cliId: insertResult[0].cliId,
     };
   } catch (err) {
-    if (connection) await connection.rollback();
+    if (connection) await connection.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     releaseConnection(connection);
@@ -179,10 +181,10 @@ export const deleteClient = async ({ cliId, updatedBy }) => {
   let connection = null;
   try {
     connection = await getConnection();
-    await connection.beginTransaction();
+    await connection.query("BEGIN");
 
     const bikesInUse = await executeQuery(
-      `SELECT bik_id FROM tbl_bikes WHERE cli_id = ? AND sta_id != 3 LIMIT 1`,
+      `SELECT bik_id FROM tbl_bikes WHERE cli_id = $1 AND sta_id != 3 LIMIT 1`,
       [cliId],
       connection
     );
@@ -196,21 +198,21 @@ export const deleteClient = async ({ cliId, updatedBy }) => {
     }
 
     const result = await executeQuery(
-      `UPDATE tbl_clients SET sta_id = 3, cli_update_by = ? WHERE cli_id = ?`,
+      `UPDATE tbl_clients SET sta_id = 3, cli_update_by = $1 WHERE cli_id = $2 RETURNING cli_id`,
       [updatedBy, cliId],
       connection
     );
 
-    if (result.affectedRows === 0) {
+    if (result.length === 0) {
       const error = new Error("Cliente no encontrado o no se pudo eliminar.");
       error.status = 404;
       throw error;
     }
 
-    await connection.commit();
+    await connection.query("COMMIT");
     return { message: "Cliente eliminado correctamente." };
   } catch (err) {
-    if (connection) await connection.rollback();
+    if (connection) await connection.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     releaseConnection(connection);
