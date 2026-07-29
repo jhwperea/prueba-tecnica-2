@@ -1,7 +1,12 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
-const imagesDir = path.join(import.meta.dirname, '../../assets/images');
+// import.meta.dirname requiere Node >= 20.11 / 21.2. En producción (Node 18)
+// no existe y path.join(undefined, ...) revienta con ERR_INVALID_ARG_TYPE.
+// fileURLToPath + path.dirname funciona en cualquier versión de Node con ESM.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const imagesDir = path.join(__dirname, '../../assets/images');
 
 const toDataUri = (filePath) => {
   const ext = path.extname(filePath).toLowerCase();
