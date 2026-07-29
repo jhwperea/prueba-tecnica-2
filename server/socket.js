@@ -8,8 +8,6 @@ const init = (httpServer) => {
     cors: {
       origin: [
         "http://localhost:3000",
-        "http://localhost:3001",
-        "https://pavastecnologia.com",
       ],
       methods: ["GET", "POST", "PUT", "DELETE"],
       credentials: true,
