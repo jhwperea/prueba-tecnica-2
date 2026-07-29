@@ -34,3 +34,5 @@ pages.css
 .env
 
 process.json
+
+/src/common/configs/database/
