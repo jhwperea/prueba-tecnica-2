@@ -25,12 +25,23 @@ const allowedOrigins = [
   'http://127.0.0.1',
   'https://pavastecnologia.com',
   'https://www.pavastecnologia.com',
+  // Dominio del frontend en Railway. Si Railway te asigna otro dominio
+  // (o lo regeneras), actualiza esto o exporta CLIENT_URL en las env vars
+  // del servicio backend y se agrega automáticamente abajo.
   'https://frontend-production-804b.up.railway.app'
 ];
 
+if (process.env.CLIENT_URL) {
+  allowedOrigins.push(process.env.CLIENT_URL);
+}
+
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.some(o => origin.startsWith(o))) {
+    if (
+      !origin ||
+      allowedOrigins.some((o) => origin.startsWith(o)) ||
+      /\.up\.railway\.app$/.test(new URL(origin).hostname) // permite cualquier subdominio *.up.railway.app
+    ) {
       callback(null, true);
     } else {
       callback(new Error('Bloqueado por políticas de CORS'));
