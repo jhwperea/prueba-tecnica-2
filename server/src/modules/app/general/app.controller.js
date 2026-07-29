@@ -21,7 +21,19 @@ export const getProfilesController = async (_req, res, next) => {
 
 export const verifyTokenController = async (req, res, next) => {
   try {
-    const token = req.cookies.tokenTEMPLATE;
+    // La cookie "tokenTEMPLATE" solo existe si el navegador la manda de
+    // vuelta al backend, pero frontend y backend están en dominios
+    // distintos (Railway), así que esa cookie casi nunca llega. El cliente
+    // manda el token real en el header Authorization (ver httpCliente.js),
+    // igual que hace authjwt.middleware.js — replicamos el mismo fallback
+    // aquí para no depender únicamente de la cookie.
+    let token = req.cookies.tokenTEMPLATE;
+    if (!token || token === "undefined" || token === "null") {
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith("Bearer ")) {
+        token = authHeader.slice(7).trim();
+      }
+    }
     const result = await appService.verifyToken(token);
     return res.status(200).json(result);
   } catch (err) {

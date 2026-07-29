@@ -84,7 +84,14 @@ const isAuthenticated = useMemo(
       // ✅ El backend devuelve: { token, useId, fullName, useEmail, proId, proName, permissions }
       const { token, permissions, ...user } = data;
 
-      //Cookies.set('tokenTEMPLATE',    token,                    { expires: 1 });
+      // El backend ya no puede depender solo del Set-Cookie automático:
+      // frontend y backend están en dominios distintos, y el navegador no
+      // deja que el JS del frontend lea una cookie que pertenece al
+      // dominio del backend. Por eso el login ahora también devuelve el
+      // token en el body, y aquí lo guardamos nosotros mismos en una
+      // cookie del dominio del frontend, que httpCliente.js sí puede leer
+      // para mandarlo como header Authorization en cada request.
+      Cookies.set('tokenTEMPLATE',    token,                    { expires: 1 });
       Cookies.set('idTEMPLATE',       JSON.stringify(user),     { expires: 1 });
 
       setUser(user);

@@ -5,15 +5,25 @@ export const loginController = async (req, res, next) => {
     const { usuario, clave, password } = req.body;
     const result = await authService.login({ usuario, clave, password });
 
+    // Frontend y backend viven en dominios distintos (Railway), así que esto
+    // es una cookie cross-site: con sameSite "Strict" el navegador NUNCA la
+    // manda de vuelta en requests entre esos dos dominios. Para que la
+    // cookie cross-site sea utilizable en absoluto, sameSite debe ser "None"
+    // (y eso obliga a secure: true, exigido por los navegadores).
+    const isProd = process.env.NODE_ENV === "production";
     res.cookie("tokenTEMPLATE", result.token, {
       httpOnly: false,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "Strict",
+      secure: isProd,
+      sameSite: isProd ? "None" : "Lax",
       maxAge: 86400000,
     });
 
-    const { token, ...userData } = result;
-    return res.json(userData);
+    // El frontend NO puede leer una cookie que pertenece al dominio del
+    // backend (aislamiento de cookies por dominio del navegador), así que
+    // además del Set-Cookie, el token va también en el body de la
+    // respuesta para que el cliente lo guarde y lo mande como
+    // "Authorization: Bearer <token>" en cada request (ver httpCliente.js).
+    return res.json(result);
   } catch (err) {
     next(err);
   }
